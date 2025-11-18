@@ -89,32 +89,6 @@ async def get_openai_streaming_response(
         yield f"Error: {str(e)}"
 
 
-async def summarize_plot_with_image(base64_image: str, prompt: str) -> str:
-    """Call GPT-4o to summarize a PNG provided as base64 data."""
-    payload = {
-        "model": "gpt-4o",
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{base64_image}"},
-                    },
-                ],
-            }
-        ],
-        "max_tokens": 300,
-    }
-
-    try:
-        data = await _post_openai(payload)
-        return data["choices"][0]["message"]["content"]
-    except Exception as exc:
-        print(f"Image summary failed: {exc}")
-        raise
-
 def format_messages(
     user_input: str,
     chat_history: List[Dict] = None,
@@ -133,15 +107,9 @@ def format_messages(
     messages = []
     
     # Add system message
-    system_prompt = "You are a helpful AI assistant. Provide clear, accurate, and helpful responses."
-    if plot_context and plot_context.get("summary"):
-        system_prompt += (
-            " Use the following description of the latest uploaded plot when answering questions: "
-            f"{plot_context['summary']}"
-        )
     messages.append({
         "role": "system",
-        "content": system_prompt
+        "content": "You are a helpful AI assistant. Provide clear, accurate, and helpful responses."
     })
     
     # Add chat history if provided

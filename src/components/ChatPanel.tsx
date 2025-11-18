@@ -13,7 +13,6 @@ interface ChatPanelProps {
 interface UploadedPlotContext {
   filename: string;
   base64: string;
-  summary?: string | null;
 }
 
 export const ChatPanel: React.FC<ChatPanelProps> = ({
@@ -181,7 +180,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       setUploadedPlot({
         filename: response.filename ?? file.name,
         base64: response.base64,
-        summary: response.summary,
       });
     } catch (err) {
       console.error('Plot upload failed', err);
@@ -238,11 +236,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                 {uploadedFileName && (
                   <p className="text-xs text-gray-600 mt-1">
                     Uploaded: {uploadedFileName}
-                  </p>
-                )}
-                {uploadedPlot?.summary && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    Summary: {uploadedPlot.summary}
                   </p>
                 )}
                 {uploadError && (

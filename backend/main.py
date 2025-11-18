@@ -47,7 +47,6 @@ from pathlib import Path
 from models.openai_chat import (
     get_openai_streaming_response,
     format_messages,
-    summarize_plot_with_image,
 )
 from kernel_manager import get_kernel_manager
 import base64
@@ -107,13 +106,6 @@ async def upload_plot(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Failed to save plot: {exc}")
 
     base64_image = base64.b64encode(contents).decode("utf-8")
-    summary = None
-    try:
-        summary_prompt = "Summarize the key trends and implications shown in this graph."
-        summary = await summarize_plot_with_image(base64_image, summary_prompt)
-    except Exception as exc:
-        print(f"Plot summary generation failed: {exc}")
-
     return {
         "status": "success",
         "filename": filename,
@@ -121,7 +113,6 @@ async def upload_plot(file: UploadFile = File(...)):
         "size": len(contents),
         "storedPath": str(file_path),
         "base64": base64_image,
-        "summary": summary,
     }
 
 @app.websocket("/ws/chat")
