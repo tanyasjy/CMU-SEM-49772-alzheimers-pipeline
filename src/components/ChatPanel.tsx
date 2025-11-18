@@ -10,6 +10,12 @@ interface ChatPanelProps {
   apiBase?: string;
 }
 
+interface UploadedPlotContext {
+  filename: string;
+  base64: string;
+  summary?: string | null;
+}
+
 export const ChatPanel: React.FC<ChatPanelProps> = ({
   messages,
   onSendMessage,
@@ -24,6 +30,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   const wsRef = useRef<ChatWebSocket | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [uploadedPlot, setUploadedPlot] = useState<UploadedPlotContext | null>(null);
   const [isUploadingPlot, setIsUploadingPlot] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
@@ -101,27 +108,32 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
     // Send message via WebSocket with enhanced content
     let accumulatedMessage = '';
-    wsRef.current.sendMessage(messageContent, history, {
-      onProgress: (chunk: string) => {
-        accumulatedMessage += chunk;
-        setCurrentMessage(accumulatedMessage);
-      },
-      onEnd: () => {
-        // Add the complete assistant message
-        if (accumulatedMessage.trim()) {
-          onSendMessage(accumulatedMessage, 'assistant');
+    wsRef.current.sendMessage(
+      messageContent,
+      history,
+      {
+        onProgress: (chunk: string) => {
+          accumulatedMessage += chunk;
+          setCurrentMessage(accumulatedMessage);
+        },
+        onEnd: () => {
+          // Add the complete assistant message
+          if (accumulatedMessage.trim()) {
+            onSendMessage(accumulatedMessage, 'assistant');
+          }
+          setIsTyping(false);
+          setCurrentMessage('');
+        },
+        onError: (error) => {
+          console.error('Chat error:', error);
+          setIsTyping(false);
+          setCurrentMessage('');
+          // Add error message
+          onSendMessage('Sorry, I encountered an error. Please try again.', 'assistant');
         }
-        setIsTyping(false);
-        setCurrentMessage('');
       },
-      onError: (error) => {
-        console.error('Chat error:', error);
-        setIsTyping(false);
-        setCurrentMessage('');
-        // Add error message
-        onSendMessage('Sorry, I encountered an error. Please try again.', 'assistant');
-      }
-    });
+      uploadedPlot ? { plotContext: uploadedPlot } : undefined
+    );
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -164,8 +176,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     setIsUploadingPlot(true);
 
     try {
-      await uploadPlotToBackend(file);
+      const response = await uploadPlotToBackend(file);
       setUploadedFileName(file.name);
+      setUploadedPlot({
+        filename: response.filename ?? file.name,
+        base64: response.base64,
+        summary: response.summary,
+      });
     } catch (err) {
       console.error('Plot upload failed', err);
       setUploadError(err instanceof Error ? err.message : 'Upload failed');
@@ -221,6 +238,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                 {uploadedFileName && (
                   <p className="text-xs text-gray-600 mt-1">
                     Uploaded: {uploadedFileName}
+                  </p>
+                )}
+                {uploadedPlot?.summary && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Summary: {uploadedPlot.summary}
                   </p>
                 )}
                 {uploadError && (

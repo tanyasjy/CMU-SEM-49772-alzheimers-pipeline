@@ -23,7 +23,7 @@ async def _post_openai(payload: Dict) -> Dict:
 
 
 async def get_openai_streaming_response(
-    messages: List[Dict[str, str]],
+    messages: List[Dict],
     model: str = "gpt-3.5-turbo",
 ):
     """
@@ -115,7 +115,11 @@ async def summarize_plot_with_image(base64_image: str, prompt: str) -> str:
         print(f"Image summary failed: {exc}")
         raise
 
-def format_messages(user_input: str, chat_history: List[Dict] = None) -> List[Dict[str, str]]:
+def format_messages(
+    user_input: str,
+    chat_history: List[Dict] = None,
+    plot_context: Optional[Dict] = None,
+) -> List[Dict]:
     """
     Format messages for OpenAI API
     
@@ -129,9 +133,15 @@ def format_messages(user_input: str, chat_history: List[Dict] = None) -> List[Di
     messages = []
     
     # Add system message
+    system_prompt = "You are a helpful AI assistant. Provide clear, accurate, and helpful responses."
+    if plot_context and plot_context.get("summary"):
+        system_prompt += (
+            " Use the following description of the latest uploaded plot when answering questions: "
+            f"{plot_context['summary']}"
+        )
     messages.append({
         "role": "system",
-        "content": "You are a helpful AI assistant. Provide clear, accurate, and helpful responses."
+        "content": system_prompt
     })
     
     # Add chat history if provided
@@ -144,9 +154,20 @@ def format_messages(user_input: str, chat_history: List[Dict] = None) -> List[Di
                 })
     
     # Add current user message
+    if plot_context and plot_context.get("base64"):
+        user_content = [
+            {"type": "text", "text": user_input},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{plot_context['base64']}"},
+            },
+        ]
+    else:
+        user_content = user_input
+
     messages.append({
         "role": "user",
-        "content": user_input
+        "content": user_content
     })
     
     return messages

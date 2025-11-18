@@ -40,7 +40,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import json
 import asyncio
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import os
 from datetime import datetime
 from pathlib import Path
@@ -74,6 +74,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     history: List[ChatMessage] = []
+    plot_context: Optional[Dict[str, Any]] = None
 
 class ExecuteRequest(BaseModel):
     code: str
@@ -138,17 +139,19 @@ async def websocket_chat(websocket: WebSocket):
                 message_data = json.loads(data)
                 user_message = message_data.get("message", "")
                 chat_history = message_data.get("history", [])
+                plot_context = message_data.get("plotContext")
                 
                 if not user_message.strip():
                     await websocket.send_text("<<<ERROR>>>")
                     continue
                 
                 # Format messages for OpenAI
-                messages = format_messages(user_message, chat_history)
+                messages = format_messages(user_message, chat_history, plot_context)
                 
                 # Get streaming response from OpenAI
                 print(f"Processing message: {user_message}")
-                response_generator = get_openai_streaming_response(messages)
+                model = "gpt-4o" if plot_context and plot_context.get("base64") else "gpt-3.5-turbo"
+                response_generator = get_openai_streaming_response(messages, model=model)
                 
                 # Stream each chunk to the client with proper async handling
                 async for chunk in response_generator:
@@ -176,11 +179,13 @@ async def websocket_chat(websocket: WebSocket):
 async def chat_stream(request: ChatRequest):
     """HTTP endpoint for streaming chat (alternative to WebSocket)"""
     try:
-        messages = format_messages(request.message, [msg.dict() for msg in request.history])
+        serialized_history = [msg.dict() for msg in request.history]
+        messages = format_messages(request.message, serialized_history, request.plot_context)
+        model = "gpt-4o" if request.plot_context and request.plot_context.get("base64") else "gpt-3.5-turbo"
         
         # Collect all chunks for HTTP response
         response_chunks = []
-        async for chunk in get_openai_streaming_response(messages):
+        async for chunk in get_openai_streaming_response(messages, model=model):
             if chunk:
                 response_chunks.append(chunk)
         

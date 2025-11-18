@@ -86,7 +86,8 @@ export class ChatWebSocket {
   sendMessage(
     message: string, 
     history: ChatMessage[] = [],
-    callbacks: Omit<ChatWebSocketCallbacks, 'onConnect' | 'onDisconnect'> = {}
+    callbacks: Omit<ChatWebSocketCallbacks, 'onConnect' | 'onDisconnect'> = {},
+    extra?: { plotContext?: unknown }
   ): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       callbacks.onError?.('WebSocket not connected');
@@ -96,10 +97,13 @@ export class ChatWebSocket {
     // Override callbacks for this specific message
     this.callbacks = { ...this.callbacks, ...callbacks };
 
-    const payload = {
+    const payload: Record<string, unknown> = {
       message,
-      history
+      history,
     };
+    if (extra?.plotContext) {
+      payload.plotContext = extra.plotContext;
+    }
 
     try {
       this.ws.send(JSON.stringify(payload));
