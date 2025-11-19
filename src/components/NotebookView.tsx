@@ -229,6 +229,11 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ currentStep, onStepC
   const [isEditorReady, setIsEditorReady] = useState(false);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const runShortcutRef = useRef<() => void>(() => {});
+  const [showAskAIModal, setShowAskAIModal] = useState(false);
+  const [selectedCodeSnippet, setSelectedCodeSnippet] = useState('');
+  const [aiQuestion, setAiQuestion] = useState('');
+  const [isSendingAIRequest, setIsSendingAIRequest] = useState(false);
+  const [hasSelection, setHasSelection] = useState(false);
 
   useEffect(() => {
     setIsEditorReady(true);
@@ -404,7 +409,45 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ currentStep, onStepC
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
       runShortcutRef.current();
     });
+    editor.onDidChangeCursorSelection(() => {
+      const snippet = getSelectedCodeSnippet();
+      setHasSelection(Boolean(snippet?.trim()));
+    });
   }, []);
+
+  const getSelectedCodeSnippet = () => {
+    const editor = editorRef.current;
+    if (!editor) return '';
+    const selection = editor.getSelection();
+    if (!selection) return '';
+    return editor.getModel()?.getValueInRange(selection) ?? '';
+  };
+
+  const openAskAIModal = () => {
+    const snippet = getSelectedCodeSnippet();
+    if (!snippet) {
+      return;
+    }
+    setSelectedCodeSnippet(snippet);
+    setAiQuestion('');
+    setShowAskAIModal(true);
+  };
+
+  const handleSendAIQuestion = async () => {
+    if (!onSendErrorToChat || !selectedCodeSnippet) {
+      setShowAskAIModal(false);
+      return;
+    }
+    const prompt = aiQuestion.trim() || 'Explain this code.';
+    const composedMessage = `Please analyze the following code snippet and answer the question.\n\nSelected code:\n\`\`\`python\n${selectedCodeSnippet}\n\`\`\`\n\nQuestion: ${prompt}`;
+    try {
+      setIsSendingAIRequest(true);
+      onSendErrorToChat(composedMessage);
+      setShowAskAIModal(false);
+    } finally {
+      setIsSendingAIRequest(false);
+    }
+  };
 
   // Initialize code from preloaded initialCodes when step changes
   useEffect(() => {
@@ -685,6 +728,87 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ currentStep, onStepC
         </div>
       )}
 
+      {showAskAIModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-2xl w-full max-w-lg mx-4">
+            <div className="flex items-center justify-between border-b px-5 py-4">
+              <div className="flex items-center space-x-2">
+                <span className="text-xl">✨</span>
+                <div>
+                  <p className="text-base font-semibold text-gray-900">Ask AI about selected code</p>
+                  <p className="text-xs text-gray-500">Selected snippet preview</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAskAIModal(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+                aria-label="Close Ask AI dialog"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="px-5 py-4 space-y-4">
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                  Selected code
+                </label>
+                <div className="mt-2 h-36 overflow-auto rounded-md border border-gray-200 bg-gray-50">
+                  <pre className="text-sm text-gray-800 p-3 whitespace-pre-wrap">
+                    {selectedCodeSnippet}
+                  </pre>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                  Ask a question
+                </label>
+                <textarea
+                  value={aiQuestion}
+                  onChange={(e) => setAiQuestion(e.target.value)}
+                  placeholder="What does this code do?"
+                  className="w-full mt-2 border border-gray-300 rounded-md p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  rows={3}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      setShowAskAIModal(false);
+                      return;
+                    }
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendAIQuestion();
+                    }
+                  }}
+                />
+              </div>
+            </div>
+            <div className="flex justify-between items-center px-5 py-4 border-t bg-gray-50 text-xs text-gray-500">
+              <span>Press Enter to send, Esc to cancel</span>
+              <div className="space-x-2">
+                <button
+                  onClick={() => setShowAskAIModal(false)}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-md hover:bg-gray-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSendAIQuestion}
+                  disabled={!selectedCodeSnippet || isSendingAIRequest}
+                  className={`
+                    px-4 py-2 text-sm font-medium rounded-md text-white
+                    ${(!selectedCodeSnippet || isSendingAIRequest)
+                      ? 'bg-blue-300 cursor-not-allowed'
+                      : 'bg-blue-600 hover:bg-blue-700'}
+                  `}
+                >
+                  {isSendingAIRequest ? 'Sending...' : 'Send'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-7xl mx-auto">
         {/* Cell for current step */}
         <div className="bg-white rounded-lg mb-4 overflow-hidden shadow-sm">
@@ -712,6 +836,21 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ currentStep, onStepC
             </div>
 
             <div className="flex items-center space-x-2">
+              <button
+                onClick={openAskAIModal}
+                disabled={!hasSelection || !onSendErrorToChat}
+                className={`
+                  flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors
+                  ${(!hasSelection || !onSendErrorToChat)
+                    ? 'bg-purple-100 text-purple-400 cursor-not-allowed'
+                    : 'bg-purple-100 text-purple-700 hover:bg-purple-200 active:bg-purple-300'}
+                `}
+                title={!hasSelection ? 'Select code to ask AI' : 'Ask AI about this code selection'}
+              >
+                <span className="text-base">✨</span>
+                <span>Ask AI</span>
+              </button>
+
               {/* Restart Kernel Button */}
               <button
                 onClick={() => setShowRestartConfirmation(true)}
