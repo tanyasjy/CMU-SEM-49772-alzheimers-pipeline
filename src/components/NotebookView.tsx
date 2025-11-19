@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CellOutput, PipelineStep } from '../types';
 import { RotateCcw, AlertCircle } from 'lucide-react';
-import { InlineAIEditor } from './InlineAIEditor';
+import Editor, { OnMount } from '@monaco-editor/react';
 
 // Define code templates corresponding to each pipeline step
 const stepCodeTemplates: Record<string, string> = {
@@ -226,6 +226,14 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ currentStep, onStepC
   const [editableCode, setEditableCode] = useState<Record<string, string>>({});
   // Terminal streaming removed; keep simple aggregated output
 
+  const [isEditorReady, setIsEditorReady] = useState(false);
+  const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const runShortcutRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    setIsEditorReady(true);
+  }, []);
+
   // Kernel restart states
   const [isRestartingKernel, setIsRestartingKernel] = useState(false);
   const [showRestartConfirmation, setShowRestartConfirmation] = useState(false);
@@ -384,6 +392,19 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ currentStep, onStepC
     if (!currentStep) return;
     await executeCode(currentStep.id);
   };
+
+  useEffect(() => {
+    runShortcutRef.current = () => {
+      runCurrentStep();
+    };
+  });
+
+  const handleEditorMount = useCallback<OnMount>((editor, monaco) => {
+    editorRef.current = editor;
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+      runShortcutRef.current();
+    });
+  }, []);
 
   // Initialize code from preloaded initialCodes when step changes
   useEffect(() => {
@@ -747,29 +768,30 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ currentStep, onStepC
                   </span>
                 </div>
               )}
-              
-              <textarea
-                ref={textareaRef}
-                value={code}
-                onChange={(e) => handleCodeChange(e.target.value)}
-                onSelect={handleSelectionChange}
-                onKeyDown={handleKeyDownWithSelection}
-                className="w-full h-[500px] bg-gray-50 p-4 rounded-md font-mono text-sm text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 leading-relaxed"
-                placeholder="Write any Python code here... (Ctrl+Enter to run, Cmd/Ctrl+K to ask AI about selected code)
 
-Examples:
-- import matplotlib.pyplot as plt
-- plt.plot([1,2,3,4])
-- plt.show()  # Images will display automatically
-- import pandas as pd
-- import numpy as np"
-                spellCheck={false}
-                style={{
-                  fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace',
-                  lineHeight: '1.5',
-                  tabSize: 4
-                }}
-              />
+              {isEditorReady ? (
+                <Editor
+                  height="500px"
+                  language="python"
+                  theme="vs-dark"
+                  value={code}
+                  onChange={(value) => handleCodeChange(value ?? '')}
+                  onMount={handleEditorMount}
+                  options={{
+                    minimap: { enabled: false },
+                    fontSize: 13,
+                    fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace',
+                    wordWrap: 'on',
+                    scrollBeyondLastLine: false,
+                    automaticLayout: true,
+                    padding: { top: 16, bottom: 16 }
+                  }}
+                />
+              ) : (
+                <div className="w-full h-[500px] bg-gray-50 rounded-md animate-pulse flex items-center justify-center text-gray-500">
+                  Loading editor...
+                </div>
+              )}
             </div>
           </div>
 

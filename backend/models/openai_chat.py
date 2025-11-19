@@ -8,7 +8,8 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY environment variable is required")
 
-openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
+# Set the API key for OpenAI 0.28.x
+openai.api_key = OPENAI_API_KEY
 
 def safe_extract_content(chunk) -> Optional[str]:
     """Safely extract content from OpenAI streaming response chunk"""
@@ -50,7 +51,8 @@ async def get_openai_streaming_response(messages: List[Dict[str, str]], model: s
     """
     try:
         print(f"Starting OpenAI stream for model: {model}")
-        response = openai_client.chat.completions.create(
+        # OpenAI 0.28.x API
+        response = openai.ChatCompletion.create(
             model=model,
             messages=messages,
             temperature=0.7,

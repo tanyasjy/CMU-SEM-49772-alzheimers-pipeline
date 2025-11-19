@@ -22,7 +22,6 @@ except ImportError:
                     key, value = line.split('=', 1)
                     os.environ[key.strip()] = value.strip()
 
-
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
