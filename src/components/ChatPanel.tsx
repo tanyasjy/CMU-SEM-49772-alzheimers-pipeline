@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Wifi, WifiOff } from 'lucide-react';
+import { Send, Bot, User, Wifi, WifiOff, Upload } from 'lucide-react';
 import { ChatMessage } from '../types';
 import { ChatWebSocket, ChatMessage as WSChatMessage } from '../lib/chat-websocket';
 
@@ -7,15 +7,31 @@ interface ChatPanelProps {
   messages: ChatMessage[];
   onSendMessage: (content: string, role?: 'user' | 'assistant') => void;
   currentCode?: string; // Add prop to receive current cell code
+  apiBase?: string;
 }
 
-export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, currentCode }) => {
+interface UploadedPlotContext {
+  filename: string;
+  base64: string;
+}
+
+export const ChatPanel: React.FC<ChatPanelProps> = ({
+  messages,
+  onSendMessage,
+  currentCode,
+  apiBase = '',
+}) => {
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [currentMessage, setCurrentMessage] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<ChatWebSocket | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [uploadedPlot, setUploadedPlot] = useState<UploadedPlotContext | null>(null);
+  const [isUploadingPlot, setIsUploadingPlot] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -91,33 +107,87 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, c
 
     // Send message via WebSocket with enhanced content
     let accumulatedMessage = '';
-    wsRef.current.sendMessage(messageContent, history, {
-      onProgress: (chunk: string) => {
-        accumulatedMessage += chunk;
-        setCurrentMessage(accumulatedMessage);
-      },
-      onEnd: () => {
-        // Add the complete assistant message
-        if (accumulatedMessage.trim()) {
-          onSendMessage(accumulatedMessage, 'assistant');
+    wsRef.current.sendMessage(
+      messageContent,
+      history,
+      {
+        onProgress: (chunk: string) => {
+          accumulatedMessage += chunk;
+          setCurrentMessage(accumulatedMessage);
+        },
+        onEnd: () => {
+          // Add the complete assistant message
+          if (accumulatedMessage.trim()) {
+            onSendMessage(accumulatedMessage, 'assistant');
+          }
+          setIsTyping(false);
+          setCurrentMessage('');
+        },
+        onError: (error) => {
+          console.error('Chat error:', error);
+          setIsTyping(false);
+          setCurrentMessage('');
+          // Add error message
+          onSendMessage('Sorry, I encountered an error. Please try again.', 'assistant');
         }
-        setIsTyping(false);
-        setCurrentMessage('');
       },
-      onError: (error) => {
-        console.error('Chat error:', error);
-        setIsTyping(false);
-        setCurrentMessage('');
-        // Add error message
-        onSendMessage('Sorry, I encountered an error. Please try again.', 'assistant');
-      }
-    });
+      uploadedPlot ? { plotContext: uploadedPlot } : undefined
+    );
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (inputValue.trim()) {
       sendMessageToAI(inputValue.trim(), true);
+    }
+  };
+
+  const handleUploadButtonClick = () => {
+    if (!isUploadingPlot) {
+      fileInputRef.current?.click();
+    }
+  };
+
+  const uploadPlotToBackend = async (file: File) => {
+    const baseUrl = apiBase?.replace(/\/$/, '') ?? '';
+    const endpoint = `${baseUrl}/api/plots/upload`;
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}));
+      throw new Error(errorBody.detail || 'Failed to upload plot');
+    }
+
+    return response.json();
+  };
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setUploadError(null);
+    setIsUploadingPlot(true);
+
+    try {
+      const response = await uploadPlotToBackend(file);
+      setUploadedFileName(file.name);
+      setUploadedPlot({
+        filename: response.filename ?? file.name,
+        base64: response.base64,
+      });
+    } catch (err) {
+      console.error('Plot upload failed', err);
+      setUploadError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setIsUploadingPlot(false);
+      // Allow uploading the same file again if desired
+      event.target.value = '';
     }
   };
 
@@ -143,6 +213,37 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, c
             <div>
               <h2 className="text-lg font-semibold text-gray-800">AI Assistant</h2>
               <p className="text-sm text-gray-600">OpenAI Streaming Chat</p>
+              <div className="mt-2">
+                <input
+                  ref={fileInputRef}
+                  id="plot-upload-input"
+                  type="file"
+                  accept="image/png"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+                <button
+                  type="button"
+                  onClick={handleUploadButtonClick}
+                  disabled={isUploadingPlot}
+                  className={`inline-flex items-center px-3 py-1 text-sm font-medium text-white rounded-md transition-colors ${
+                    isUploadingPlot ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+                  }`}
+                >
+                  <Upload className="w-4 h-4 mr-2" />
+                  Upload plot as png
+                </button>
+                {uploadedFileName && (
+                  <p className="text-xs text-gray-600 mt-1">
+                    Uploaded: {uploadedFileName}
+                  </p>
+                )}
+                {uploadError && (
+                  <p className="text-xs text-red-500 mt-1">
+                    {uploadError}
+                  </p>
+                )}
+              </div>
             </div>
           </div>
           <div className="flex items-center space-x-2">

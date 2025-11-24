@@ -1,63 +1,99 @@
-import openai
-from typing import List, Dict, Generator, Optional
+from typing import List, Dict, Optional
 import json
 import os
+
+import httpx
 
 # Get API key from environment variable
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY environment variable is required")
 
-openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
-def safe_extract_content(chunk) -> Optional[str]:
-    """Safely extract content from OpenAI streaming response chunk"""
-    try:
-        if hasattr(chunk, 'choices') and len(chunk.choices) > 0:
-            delta = chunk.choices[0].delta
-            if hasattr(delta, 'content') and delta.content is not None:
-                return delta.content
-        return None
-    except Exception as e:
-        print(f"Error extracting content: {e}")
-        return None
+async def _post_openai(payload: Dict) -> Dict:
+    url = "https://api.openai.com/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+        return response.json()
 
-async def get_openai_streaming_response(messages: List[Dict[str, str]], model: str = "gpt-3.5-turbo"):
+
+async def get_openai_streaming_response(
+    messages: List[Dict],
+    model: str = "gpt-3.5-turbo",
+):
     """
-    Get streaming response from OpenAI API (async version)
-    
-    Args:
-        messages: List of message dictionaries with 'role' and 'content'
-        model: OpenAI model to use
-    
-    Yields:
-        str: Content chunks from the streaming response
+    Get streaming response from OpenAI API (async version) using direct HTTP calls.
+
+    This avoids relying on the `openai` Python SDK so we don't hit
+    compatibility issues with the installed `httpx` version.
     """
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": 0.7,
+        "max_tokens": 2000,
+        "stream": True,
+    }
+
     try:
         print(f"Starting OpenAI stream for model: {model}")
-        response = openai_client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=0.7,
-            max_tokens=2000,
-            stream=True
-        )
-        
-        chunk_count = 0
-        for chunk in response:
-            content = safe_extract_content(chunk)
-            if content is not None:
-                chunk_count += 1
-                print(f"Chunk {chunk_count}: '{content}'")  # Debug log
-                yield content
-        
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            async with client.stream(
+            "POST",
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        ) as response:
+                response.raise_for_status()
+
+                chunk_count = 0
+                async for line in response.aiter_lines():
+                    if not line:
+                        continue
+
+                    # OpenAI streams lines prefixed with "data: "
+                    if not line.startswith("data: "):
+                        continue
+
+                    data_str = line[len("data: ") :].strip()
+                    if data_str == "[DONE]":
+                        break
+
+                    try:
+                        data = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        print(f"Failed to decode JSON from line: {line}")
+                        continue
+
+                    for choice in data.get("choices", []):
+                        delta = choice.get("delta", {})
+                        content = delta.get("content")
+                        if content:
+                            chunk_count += 1
+                            print(f"Chunk {chunk_count}: '{content}'")
+                            yield content
+
         print(f"Stream completed. Total chunks: {chunk_count}")
-                
+
     except Exception as e:
         print(f"OpenAI API Error: {e}")
         yield f"Error: {str(e)}"
 
-def format_messages(user_input: str, chat_history: List[Dict] = None) -> List[Dict[str, str]]:
+
+def format_messages(
+    user_input: str,
+    chat_history: List[Dict] = None,
+    plot_context: Optional[Dict] = None,
+) -> List[Dict]:
     """
     Format messages for OpenAI API
     
@@ -86,9 +122,20 @@ def format_messages(user_input: str, chat_history: List[Dict] = None) -> List[Di
                 })
     
     # Add current user message
+    if plot_context and plot_context.get("base64"):
+        user_content = [
+            {"type": "text", "text": user_input},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{plot_context['base64']}"},
+            },
+        ]
+    else:
+        user_content = user_input
+
     messages.append({
         "role": "user",
-        "content": user_input
+        "content": user_content
     })
     
     return messages
