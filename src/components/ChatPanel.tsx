@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Wifi, WifiOff, Upload, FileText, X, Loader } from 'lucide-react';
 import { ChatMessage } from '../types';
 import { ChatWebSocket, ChatMessage as WSChatMessage } from '../lib/chat-websocket';
+import { MarkdownMessage } from './MarkdownMessage';
 
 interface ChatPanelProps {
   messages: ChatMessage[];
@@ -307,10 +308,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, c
             >
               <div className="flex items-start space-x-2">
                 {message.role === 'assistant' && (
-                  <Bot className="w-4 h-4 mt-0.5 text-blue-600" />
+                  <Bot className="w-4 h-4 mt-0.5 flex-shrink-0 text-blue-600" />
                 )}
-                <div className="flex-1">
-                  <p className="text-sm">{message.content}</p>
+                <div className="flex-1 min-w-0">
+                  {message.role === 'assistant' ? (
+                    <MarkdownMessage content={message.content} className="text-sm" />
+                  ) : (
+                    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                  )}
                   <p className={`text-xs mt-1 ${
                     message.role === 'user' ? 'text-blue-100' : 'text-gray-500'
                   }`}>
@@ -318,7 +323,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, c
                   </p>
                 </div>
                 {message.role === 'user' && (
-                  <User className="w-4 h-4 mt-0.5 text-blue-100" />
+                  <User className="w-4 h-4 mt-0.5 flex-shrink-0 text-blue-100" />
                 )}
               </div>
             </div>
@@ -330,9 +335,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, c
           <div className="flex justify-start">
             <div className="bg-gray-100 text-gray-800 rounded-lg p-3 max-w-[80%]">
               <div className="flex items-start space-x-2">
-                <Bot className="w-4 h-4 mt-0.5 text-blue-600" />
-                <div className="flex-1">
-                  <p className="text-sm whitespace-pre-wrap">{currentMessage}</p>
+                <Bot className="w-4 h-4 mt-0.5 flex-shrink-0 text-blue-600" />
+                <div className="flex-1 min-w-0">
+                  <MarkdownMessage content={currentMessage} className="text-sm" />
                   <div className="inline-block w-2 h-4 bg-blue-600 animate-pulse ml-1"></div>
                 </div>
               </div>
