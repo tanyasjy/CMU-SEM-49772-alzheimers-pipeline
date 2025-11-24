@@ -85,10 +85,22 @@ def format_messages(user_input: str, chat_history: List[Dict] = None) -> List[Di
     """
     messages = []
     
-    # Add system message
+    # Add system message with markdown formatting instructions
     messages.append({
         "role": "system",
-        "content": "You are a helpful AI assistant. Provide clear, accurate, and helpful responses."
+        "content": """You are a helpful AI assistant. Provide clear, accurate, and helpful responses.
+
+Format your responses using markdown for better readability:
+- Use **bold** for emphasis on important terms
+- Use *italics* for subtle emphasis
+- Use bullet points and numbered lists for organization
+- Use `code` for technical terms, function names, or code snippets
+- Use code blocks (```) for multi-line code
+- Use [links](url) for references
+- Use headings (##) to structure longer responses
+- Use tables when presenting structured data
+
+Always structure your responses for maximum clarity and readability."""
     })
     
     # Add chat history if provided

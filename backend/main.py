@@ -49,14 +49,32 @@ TEMP_DIR = tempfile.mkdtemp(prefix="gene_ide_pdfs_")
 
 # PDF summary response format
 PDF_SUMMARY_FORMAT = """
-Format the response in the following format:
-- Prevalence of the issue
-- Impact of the paper - Innovation of paper
-- Existing landscape (Current state) in terms of research paper
-- Hypothesis of the paper
-- Datasets(Ex: open, closed, propriety)
-- Methods/Approach - like deep learning, machine learning/statistics
-- Results
+Format the response using markdown with the following sections:
+
+## Summary Structure
+
+### 1. Prevalence of the Issue
+Describe the scope and importance of the problem being addressed.
+
+### 2. Impact & Innovation
+Explain the paper's contribution and innovative aspects.
+
+### 3. Existing Landscape
+Summarize the current state of research in this area.
+
+### 4. Hypothesis
+State the paper's main hypothesis or research question.
+
+### 5. Datasets
+List the datasets used (specify if open, closed, or proprietary).
+
+### 6. Methods & Approach
+Describe the methodology (e.g., deep learning, machine learning, statistics).
+Use **bold** for key techniques and `code` for specific algorithms or frameworks.
+
+### 7. Results
+Summarize the main findings and their significance.
+Use tables or bullet points for quantitative results when appropriate.
 
 """
 
@@ -80,7 +98,7 @@ def is_document_summary_query(query: str) -> bool:
     Returns True if the query is a document summary query.
     """
     query_lower = query.lower()
-    instruction = "You are an assistant who is goig to tell me if the query is a document summary query. If it is, return True, otherwise return False."
+    instruction = "You are an assistant who is going to tell me if the query is a document summary query. If it is, return True, otherwise return False."
     response = query_openai_api(instruction, query_lower)
     return "true" in response.lower()
 
