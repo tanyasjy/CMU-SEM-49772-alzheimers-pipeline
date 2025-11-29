@@ -208,11 +208,12 @@ interface NotebookViewProps {
   currentStep: PipelineStep | null;
   onStepComplete?: (stepId: string, success: boolean) => void;
   onCodeChange?: (code: string) => void; // Add prop for code change callback
+  onAllCodesChange?: (allCodes: Record<string, string>) => void; // Add prop for all edited codes
   onSendErrorToChat?: (errorMessage: string) => void; // Add prop for sending errors to chat
   initialCodes?: Record<string, string>;
 }
 
-export const NotebookView: React.FC<NotebookViewProps> = ({ currentStep, onStepComplete, onCodeChange, onSendErrorToChat, initialCodes }) => {
+export const NotebookView: React.FC<NotebookViewProps> = ({ currentStep, onStepComplete, onCodeChange, onAllCodesChange, onSendErrorToChat, initialCodes }) => {
   const [cellStates, setCellStates] = useState<Record<string, {
     executed: boolean;
     executing: boolean;
@@ -260,6 +261,13 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ currentStep, onStepC
       onCodeChange(currentCode);
     }
   }, [currentStep, editableCode, onCodeChange]);
+
+  // Update all codes when editableCode changes
+  useEffect(() => {
+    if (onAllCodesChange) {
+      onAllCodesChange(editableCode);
+    }
+  }, [editableCode, onAllCodesChange]);
 
   const handleExplainError = (errorOutput: CellOutput) => {
     if (!onSendErrorToChat || !currentStep) {
