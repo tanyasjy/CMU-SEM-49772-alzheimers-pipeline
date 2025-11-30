@@ -243,12 +243,6 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ currentStep, onStepC
   const [isRestartingKernel, setIsRestartingKernel] = useState(false);
   const [showRestartConfirmation, setShowRestartConfirmation] = useState(false);
 
-  // Inline AI Editor states
-  const [showInlineAIEditor, setShowInlineAIEditor] = useState(false);
-  const [selectedText, setSelectedText] = useState('');
-  const [editorPosition, setEditorPosition] = useState({ x: 0, y: 0 });
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
   // Get current step's cell state
   const getCurrentCellState = () => {
     if (!currentStep) return { executed: false, executing: false, outputs: [] };
@@ -553,54 +547,6 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ currentStep, onStepC
     }
   };
 
-  // Inline AI Editor handlers
-  const handleSelectionChange = () => {
-    if (!textareaRef.current) return;
-    const textarea = textareaRef.current;
-    const selection = textarea.value.substring(textarea.selectionStart, textarea.selectionEnd);
-    setSelectedText(selection);
-  };
-
-  const handleKeyDownWithSelection = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Handle Ctrl+Enter for code execution
-    if (e.ctrlKey && e.key === 'Enter') {
-      e.preventDefault();
-      runCurrentStep();
-      return;
-    }
-
-    // Handle Cmd/Ctrl+K for inline AI
-    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-      e.preventDefault();
-      const textarea = textareaRef.current;
-      if (textarea) {
-        const selection = textarea.value.substring(textarea.selectionStart, textarea.selectionEnd);
-        if (selection.trim()) {
-          setSelectedText(selection);
-          // Calculate position for the editor popup
-          const rect = textarea.getBoundingClientRect();
-          setEditorPosition({
-            x: rect.left + 20,
-            y: rect.top + textarea.scrollTop + 20
-          });
-          setShowInlineAIEditor(true);
-        }
-      }
-      return;
-    }
-
-    // Handle Escape to close editor
-    if (e.key === 'Escape' && showInlineAIEditor) {
-      setShowInlineAIEditor(false);
-    }
-  };
-
-  const handleSendInlineQuery = (query: string, context: string) => {
-    if (onSendErrorToChat) {
-      const fullPrompt = `${query}\n\nContext:\n${context}`;
-      onSendErrorToChat(fullPrompt);
-    }
-  };
 
   const renderOutput = (output: CellOutput) => {
     switch (output.type) {
@@ -956,15 +902,6 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ currentStep, onStepC
           </div>
         </div>
       </div>
-
-      {/* Inline AI Editor */}
-      <InlineAIEditor
-        isVisible={showInlineAIEditor}
-        onClose={() => setShowInlineAIEditor(false)}
-        selectedText={selectedText}
-        position={editorPosition}
-        onSendQuery={handleSendInlineQuery}
-      />
     </div>
   );
 };
