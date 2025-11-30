@@ -4,9 +4,29 @@ from PyPDF2 import PdfReader
 import faiss
 import numpy as np
 import tiktoken
-from openai import OpenAI
+import os
+import requests
 
-client = OpenAI()
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # If python-dotenv is not installed, manually load .env file
+    env_path = os.path.join(os.path.dirname(__file__), '.env')
+    if os.path.exists(env_path):
+        with open(env_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    os.environ[key.strip()] = value.strip()
+
+# Get API key from environment variable
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    raise ValueError("OPENAI_API_KEY environment variable is required")
+
 EMBED_MODEL = "text-embedding-3-large"
 ENC = tiktoken.get_encoding("cl100k_base")
 
@@ -37,10 +57,24 @@ def chunk_text(texts, max_tokens=800, overlap=80):
     return chunks
 
 def embed_texts(chunks):
-    """Call OpenAI embeddings API"""
+    """Call OpenAI embeddings API using direct HTTP requests"""
     texts = [c["text"] for c in chunks]
-    res = client.embeddings.create(model=EMBED_MODEL, input=texts)
-    embs = np.array([r.embedding for r in res.data]).astype("float32")
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": EMBED_MODEL,
+        "input": texts
+    }
+    response = requests.post(
+        "https://api.openai.com/v1/embeddings",
+        headers=headers,
+        json=data
+    )
+    response.raise_for_status()
+    result = response.json()
+    embs = np.array([item["embedding"] for item in result["data"]]).astype("float32")
     return embs
 
 
@@ -55,8 +89,24 @@ def build_faiss_index(embs):
 
 def retrieve(index, embs, chunks, query, k=5):
     """Retrieve top-k relevant chunks for a query"""
-    q_emb = client.embeddings.create(model=EMBED_MODEL, input=[query]).data[0].embedding
-    q_emb = np.array([q_emb]).astype("float32")
+    # Create embedding for query using direct HTTP request
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": EMBED_MODEL,
+        "input": [query]
+    }
+    response = requests.post(
+        "https://api.openai.com/v1/embeddings",
+        headers=headers,
+        json=data
+    )
+    response.raise_for_status()
+    result = response.json()
+    q_emb = np.array([result["data"][0]["embedding"]]).astype("float32")
+    
     faiss.normalize_L2(q_emb)
     scores, ids = index.search(q_emb, k)
     results = []

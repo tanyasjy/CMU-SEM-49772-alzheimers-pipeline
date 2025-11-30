@@ -19,7 +19,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSection, onSectionChange
     <div className="w-12 bg-gray-800 flex flex-col items-center py-4 gap-2">
       {/* Logo/Title */}
       <div className="mb-4 pb-4 border-b border-gray-700 w-full flex justify-center">
-        <Brain className="w-7 h-7 text-purple-400" title="Alzheimer's Pipeline" />
+        <div title="Alzheimer's Pipeline" aria-label="Alzheimer's Pipeline">
+          <Brain className="w-7 h-7 text-purple-400" />
+        </div>
       </div>
 
       {/* Section Icons */}
