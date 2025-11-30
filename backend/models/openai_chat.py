@@ -23,7 +23,7 @@ def safe_extract_content(chunk) -> Optional[str]:
         print(f"Error extracting content: {e}")
         return None
 
-def query_openai_api(instruction: str, inp: str, model: str = "gpt-3.5-turbo"):
+def query_openai_api(instruction: str, inp: str, model: str = "gpt-4o"):
     """
     Query OpenAI API (OpenAI 0.28.x compatible)
     """
