@@ -8,8 +8,34 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY environment variable is required")
 
-# Set the API key for OpenAI 0.28.x
-openai.api_key = OPENAI_API_KEY
+# Detect OpenAI SDK version
+def _get_openai_version():
+    """Get the major version of the OpenAI SDK"""
+    try:
+        version = openai.__version__
+        major_version = int(version.split('.')[0])
+        return major_version, version
+    except Exception:
+        # If we can't determine version, assume old SDK
+        return 0, "unknown"
+
+OPENAI_MAJOR_VERSION, OPENAI_VERSION = _get_openai_version()
+print(f"OpenAI SDK version detected: {OPENAI_VERSION} (major: {OPENAI_MAJOR_VERSION})")
+
+# Initialize based on SDK version
+if OPENAI_MAJOR_VERSION >= 1:
+    # New SDK (1.x+)
+    from openai import OpenAI
+    client = OpenAI(api_key=OPENAI_API_KEY)
+    USE_NEW_SDK = True
+    print("Using OpenAI SDK 1.x+ API")
+else:
+    # Old SDK (0.28.x)
+    openai.api_key = OPENAI_API_KEY
+    client = None
+    USE_NEW_SDK = False
+    print("Using OpenAI SDK 0.28.x API")
+
 
 def safe_extract_content(chunk) -> Optional[str]:
     """Safely extract content from OpenAI streaming response chunk"""
@@ -23,24 +49,40 @@ def safe_extract_content(chunk) -> Optional[str]:
         print(f"Error extracting content: {e}")
         return None
 
+
 def query_openai_api(instruction: str, inp: str, model: str = "gpt-4o"):
     """
-    Query OpenAI API (OpenAI 0.28.x compatible)
+    Query OpenAI API (supports both 0.28.x and 1.x+ SDKs)
     """
-    response = openai.ChatCompletion.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": instruction},
-            {"role": "user", "content": inp}
-        ],
-        temperature=0.7,
-        max_tokens=2000
-    )
-    return response.choices[0].message.content
+    messages = [
+        {"role": "system", "content": instruction},
+        {"role": "user", "content": inp}
+    ]
+    
+    if USE_NEW_SDK:
+        # New SDK (1.x+)
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=2000
+        )
+        return response.choices[0].message.content
+    else:
+        # Old SDK (0.28.x)
+        response = openai.ChatCompletion.create(
+            model=model,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=2000
+        )
+        return response.choices[0].message.content
+
 
 async def get_openai_streaming_response(messages: List[Dict[str, str]], model: str = "gpt-4o"):
     """
     Get streaming response from OpenAI API (async version)
+    Supports both OpenAI SDK 0.28.x and 1.x+
     
     Args:
         messages: List of message dictionaries with 'role' and 'content'
@@ -50,29 +92,49 @@ async def get_openai_streaming_response(messages: List[Dict[str, str]], model: s
         str: Content chunks from the streaming response
     """
     try:
-        print(f"Starting OpenAI stream for model: {model}")
-        # OpenAI 0.28.x API
-        response = openai.ChatCompletion.create(
-            model=model,
-            messages=messages,
-            temperature=0.7,
-            max_tokens=2000,
-            stream=True
-        )
+        print(f"Starting OpenAI stream for model: {model} (SDK: {OPENAI_VERSION})")
         
-        chunk_count = 0
-        for chunk in response:
-            content = safe_extract_content(chunk)
-            if content is not None:
-                chunk_count += 1
-                print(f"Chunk {chunk_count}: '{content}'")  # Debug log
-                yield content
-        
-        print(f"Stream completed. Total chunks: {chunk_count}")
+        if USE_NEW_SDK:
+            # New SDK (1.x+) streaming
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=2000,
+                stream=True
+            )
+            
+            chunk_count = 0
+            for chunk in response:
+                content = safe_extract_content(chunk)
+                if content is not None:
+                    chunk_count += 1
+                    yield content
+            
+            print(f"Stream completed. Total chunks: {chunk_count}")
+        else:
+            # Old SDK (0.28.x) streaming
+            response = openai.ChatCompletion.create(
+                model=model,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=2000,
+                stream=True
+            )
+            
+            chunk_count = 0
+            for chunk in response:
+                content = safe_extract_content(chunk)
+                if content is not None:
+                    chunk_count += 1
+                    yield content
+            
+            print(f"Stream completed. Total chunks: {chunk_count}")
                 
     except Exception as e:
         print(f"OpenAI API Error: {e}")
         yield f"Error: {str(e)}"
+
 
 def format_messages(user_input: str, chat_history: List[Dict] = None) -> List[Dict[str, str]]:
     """
