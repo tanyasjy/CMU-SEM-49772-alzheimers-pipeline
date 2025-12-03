@@ -12,7 +12,7 @@ interface PipelinePanelProps {
 export const PipelinePanel: React.FC<PipelinePanelProps> = ({
   steps,
   currentStepId,
-  onStepClick
+  onStepClick,
 }) => {
   const getStatusIcon = (status: PipelineStep['status']) => {
     switch (status) {
@@ -31,13 +31,13 @@ export const PipelinePanel: React.FC<PipelinePanelProps> = ({
     <div className="h-full flex flex-col">
       <div className="p-4 border-b border-gray-200">
         <h2 className="text-lg font-semibold text-gray-800">
-          Alzheimer's Analysis Pipeline
+          Pipeline Steps
         </h2>
         <p className="text-sm text-gray-600 mt-1">
           Click steps to view and execute code
         </p>
       </div>
-      
+
       <div className="flex-1 overflow-y-auto">
         {steps.map((step, index) => (
           <div
@@ -63,7 +63,7 @@ export const PipelinePanel: React.FC<PipelinePanelProps> = ({
                   )}
                 </div>
               </div>
-              
+
               <div className="flex items-center space-x-2">
                 {getStatusIcon(step.status)}
               </div>

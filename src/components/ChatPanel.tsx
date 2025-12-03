@@ -1,12 +1,23 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Wifi, WifiOff, Upload } from 'lucide-react';
+import { Send, Bot, User, Wifi, WifiOff, Upload, FileText, X, Loader } from 'lucide-react';
 import { ChatMessage } from '../types';
 import { ChatWebSocket, ChatMessage as WSChatMessage } from '../lib/chat-websocket';
+import { MarkdownMessage } from './MarkdownMessage';
 
 interface ChatPanelProps {
   messages: ChatMessage[];
   onSendMessage: (content: string, role?: 'user' | 'assistant') => void;
-  currentCode?: string; // Add prop to receive current cell code
+  currentCode?: string; // Current cell code (legacy, may be removed)
+  currentCellId?: string; // Current active cell ID
+  allEditedCodes?: Record<string, string>; // All edited codes from UI
+  initialCodes?: Record<string, string>; // Initial codes from file
+  apiBase?: string; // API base URL
+}
+
+interface PdfInfo {
+  name: string;
+  numPages: number;
+  numChunks: number;
   apiBase?: string;
 }
 
@@ -19,19 +30,30 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   messages,
   onSendMessage,
   currentCode,
+  currentCellId,
+  allEditedCodes,
+  initialCodes,
   apiBase = '',
 }) => {
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [currentMessage, setCurrentMessage] = useState('');
+  const [uploadedPdf, setUploadedPdf] = useState<PdfInfo | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [sessionId] = useState(() => {
+    // Generate session ID once on mount
+    return `session_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+  });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<ChatWebSocket | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const fileInputRefPNG = useRef<HTMLInputElement | null>(null);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [uploadedPlot, setUploadedPlot] = useState<UploadedPlotContext | null>(null);
   const [isUploadingPlot, setIsUploadingPlot] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadPNGError, setUploadPNGError] = useState<string | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -57,13 +79,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   }, [messages]); // Include messages in dependency to get latest history
 
   useEffect(() => {
-    // Initialize WebSocket connection
+    // Initialize WebSocket connection with session ID
     const wsEndpoint = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws/chat';
-    wsRef.current = new ChatWebSocket(wsEndpoint);
+    wsRef.current = new ChatWebSocket(wsEndpoint, sessionId);
     
     wsRef.current.connect({
       onConnect: () => {
-        console.log('Connected to chat WebSocket');
+        console.log('Connected to chat WebSocket with session:', sessionId);
         setIsConnected(true);
       },
       onDisconnect: () => {
@@ -79,7 +101,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     return () => {
       wsRef.current?.disconnect();
     };
-  }, []);
+  }, [sessionId]);
 
   const sendMessageToAI = (messageText: string, isFromInput: boolean = true) => {
     if (!wsRef.current?.isConnected || isTyping) return;
@@ -89,7 +111,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     if (currentCode && currentCode.trim()) {
       messageContent = `User Message: ${messageText}\n\nCurrent Cell Code:\n\`\`\`python\n${currentCode}\n\`\`\``;
     }
-    
+
     // Add user message immediately only if it's from input (not from error button)
     if (isFromInput) {
       onSendMessage(messageText);
@@ -105,7 +127,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       content: msg.content
     }));
 
-    // Send message via WebSocket with enhanced content
+    // Merge initial codes with edited codes (edited codes override initial)
+    const mergedCodes = { ...initialCodes, ...allEditedCodes };
+    
+    // Send message via WebSocket with cell context and code
     let accumulatedMessage = '';
     wsRef.current.sendMessage(
       messageContent,
@@ -142,9 +167,65 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     }
   };
 
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.endsWith('.pdf')) {
+      setUploadError('Please select a PDF file');
+      return;
+    }
+
+    await uploadPdf(file);
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const uploadPdf = async (file: File) => {
+    setIsUploading(true);
+    setUploadError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('session_id', sessionId);
+
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${apiUrl}/api/upload_pdf`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to upload PDF');
+      }
+
+      const data = await response.json();
+      setUploadedPdf({
+        name: data.pdf_name,
+        numPages: data.num_pages,
+        numChunks: data.num_chunks,
+      });
+      console.log('PDF uploaded successfully:', data);
+    } catch (error) {
+      console.error('Error uploading PDF:', error);
+      setUploadError(error instanceof Error ? error.message : 'Failed to upload PDF');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleRemovePdf = () => {
+    setUploadedPdf(null);
+    setUploadError(null);
+  };
+
   const handleUploadButtonClick = () => {
     if (!isUploadingPlot) {
-      fileInputRef.current?.click();
+      fileInputRefPNG.current?.click();
     }
   };
 
@@ -171,7 +252,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     const file = event.target.files?.[0];
     if (!file) return;
 
-    setUploadError(null);
+    setUploadPNGError(null);
     setIsUploadingPlot(true);
 
     try {
@@ -183,7 +264,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       });
     } catch (err) {
       console.error('Plot upload failed', err);
-      setUploadError(err instanceof Error ? err.message : 'Upload failed');
+      setUploadPNGError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
       setIsUploadingPlot(false);
       // Allow uploading the same file again if desired
@@ -215,7 +296,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               <p className="text-sm text-gray-600">OpenAI Streaming Chat</p>
               <div className="mt-2">
                 <input
-                  ref={fileInputRef}
+                  ref={fileInputRefPNG}
                   id="plot-upload-input"
                   type="file"
                   accept="image/png"
@@ -226,12 +307,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                   type="button"
                   onClick={handleUploadButtonClick}
                   disabled={isUploadingPlot}
-                  className={`inline-flex items-center px-3 py-1 text-sm font-medium text-white rounded-md transition-colors ${
-                    isUploadingPlot ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
-                  }`}
+                  className='flex items-center space-x-2 px-3 py-2 text-sm bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
                 >
                   <Upload className="w-4 h-4 mr-2" />
-                  Upload plot as png
+                  Upload plot as PNG
                 </button>
                 {uploadedFileName && (
                   <p className="text-xs text-gray-600 mt-1">
@@ -240,7 +319,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                 )}
                 {uploadError && (
                   <p className="text-xs text-red-500 mt-1">
-                    {uploadError}
+                    {uploadPNGError}
                   </p>
                 )}
               </div>
@@ -256,6 +335,69 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               {isConnected ? 'Connected' : 'Disconnected'}
             </span>
           </div>
+        </div>
+
+        {/* PDF Upload Section */}
+        <div className="mt-4 space-y-2 ml-8">
+          {/* Upload Button */}
+          {!uploadedPdf && (
+            <div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf"
+                onChange={handleFileSelect}
+                className="hidden"
+                disabled={isUploading}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+                className="flex items-center space-x-2 px-3 py-2 text-sm bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isUploading ? (
+                  <>
+                    <Loader className="w-4 h-4 animate-spin" />
+                    <span>Uploading & Indexing...</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4" />
+                    <span>Upload Research Paper (PDF)</span>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+
+          {/* Uploaded PDF Info */}
+          {uploadedPdf && (
+            <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
+              <div className="flex items-center space-x-2">
+                <FileText className="w-4 h-4 text-green-600" />
+                <div>
+                  <p className="text-sm font-medium text-green-900">{uploadedPdf.name}</p>
+                  <p className="text-xs text-green-700">
+                    {uploadedPdf.numPages} pages • {uploadedPdf.numChunks} chunks indexed
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleRemovePdf}
+                className="p-1 hover:bg-green-100 rounded transition-colors"
+                title="Remove PDF"
+              >
+                <X className="w-4 h-4 text-green-700" />
+              </button>
+            </div>
+          )}
+
+          {/* Upload Error */}
+          {uploadError && (
+            <div className="p-2 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-xs text-red-700">{uploadError}</p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -275,10 +417,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             >
               <div className="flex items-start space-x-2">
                 {message.role === 'assistant' && (
-                  <Bot className="w-4 h-4 mt-0.5 text-blue-600" />
+                  <Bot className="w-4 h-4 mt-0.5 flex-shrink-0 text-blue-600" />
                 )}
-                <div className="flex-1">
-                  <p className="text-sm">{message.content}</p>
+                <div className="flex-1 min-w-0">
+                  {message.role === 'assistant' ? (
+                    <MarkdownMessage content={message.content} className="text-sm" />
+                  ) : (
+                    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                  )}
                   <p className={`text-xs mt-1 ${
                     message.role === 'user' ? 'text-blue-100' : 'text-gray-500'
                   }`}>
@@ -286,7 +432,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                   </p>
                 </div>
                 {message.role === 'user' && (
-                  <User className="w-4 h-4 mt-0.5 text-blue-100" />
+                  <User className="w-4 h-4 mt-0.5 flex-shrink-0 text-blue-100" />
                 )}
               </div>
             </div>
@@ -298,9 +444,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           <div className="flex justify-start">
             <div className="bg-gray-100 text-gray-800 rounded-lg p-3 max-w-[80%]">
               <div className="flex items-start space-x-2">
-                <Bot className="w-4 h-4 mt-0.5 text-blue-600" />
-                <div className="flex-1">
-                  <p className="text-sm whitespace-pre-wrap">{currentMessage}</p>
+                <Bot className="w-4 h-4 mt-0.5 flex-shrink-0 text-blue-600" />
+                <div className="flex-1 min-w-0">
+                  <MarkdownMessage content={currentMessage} className="text-sm" />
                   <div className="inline-block w-2 h-4 bg-blue-600 animate-pulse ml-1"></div>
                 </div>
               </div>

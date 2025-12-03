@@ -44,4 +44,57 @@
   .step-running {
     @apply text-blue-600;
   }
+
+  /* Markdown content styling for chat messages */
+  .markdown-content {
+    @apply text-sm leading-relaxed;
+  }
+
+  .markdown-content > *:first-child {
+    @apply mt-0;
+  }
+
+  .markdown-content > *:last-child {
+    @apply mb-0;
+  }
+
+  /* Better spacing for nested lists */
+  .markdown-content ul ul,
+  .markdown-content ol ul,
+  .markdown-content ul ol,
+  .markdown-content ol ol {
+    @apply mt-1 mb-1;
+  }
+
+  /* Code block scrollbar styling */
+  .markdown-content code::-webkit-scrollbar {
+    @apply h-2;
+  }
+
+  .markdown-content code::-webkit-scrollbar-track {
+    @apply bg-gray-200 rounded;
+  }
+
+  .markdown-content code::-webkit-scrollbar-thumb {
+    @apply bg-gray-400 rounded;
+  }
+
+  .markdown-content code::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-500;
+  }
+
+  /* Ensure inline code doesn't wrap awkwardly */
+  .markdown-content code {
+    @apply break-words;
+  }
+
+  /* Better link styling in assistant messages */
+  .markdown-content a {
+    @apply font-medium transition-colors duration-150;
+  }
+
+  /* Table responsive styling */
+  .markdown-content table {
+    @apply text-sm;
+  }
 } 
