@@ -11,15 +11,30 @@ interface ChatPanelProps {
   currentCellId?: string; // Current active cell ID
   allEditedCodes?: Record<string, string>; // All edited codes from UI
   initialCodes?: Record<string, string>; // Initial codes from file
+  apiBase?: string; // API base URL
 }
 
 interface PdfInfo {
   name: string;
   numPages: number;
   numChunks: number;
+  apiBase?: string;
 }
 
-export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, currentCode, currentCellId, allEditedCodes, initialCodes }) => {
+interface UploadedPlotContext {
+  filename: string;
+  base64: string;
+}
+
+export const ChatPanel: React.FC<ChatPanelProps> = ({
+  messages,
+  onSendMessage,
+  currentCode,
+  currentCellId,
+  allEditedCodes,
+  initialCodes,
+  apiBase = '',
+}) => {
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
@@ -33,7 +48,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, c
   });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<ChatWebSocket | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const fileInputRefPNG = useRef<HTMLInputElement | null>(null);
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [uploadedPlot, setUploadedPlot] = useState<UploadedPlotContext | null>(null);
+  const [isUploadingPlot, setIsUploadingPlot] = useState(false);
+  const [uploadPNGError, setUploadPNGError] = useState<string | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -86,6 +106,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, c
   const sendMessageToAI = (messageText: string, isFromInput: boolean = true) => {
     if (!wsRef.current?.isConnected || isTyping) return;
 
+    // Create message content that includes current code if available
+    let messageContent = messageText;
+    if (currentCode && currentCode.trim()) {
+      messageContent = `User Message: ${messageText}\n\nCurrent Cell Code:\n\`\`\`python\n${currentCode}\n\`\`\``;
+    }
+
     // Add user message immediately only if it's from input (not from error button)
     if (isFromInput) {
       onSendMessage(messageText);
@@ -106,27 +132,32 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, c
     
     // Send message via WebSocket with cell context and code
     let accumulatedMessage = '';
-    wsRef.current.sendMessage(messageText, history, currentCellId, mergedCodes, {
-      onProgress: (chunk: string) => {
-        accumulatedMessage += chunk;
-        setCurrentMessage(accumulatedMessage);
-      },
-      onEnd: () => {
-        // Add the complete assistant message
-        if (accumulatedMessage.trim()) {
-          onSendMessage(accumulatedMessage, 'assistant');
+    wsRef.current.sendMessage(
+      messageContent,
+      history,
+      {
+        onProgress: (chunk: string) => {
+          accumulatedMessage += chunk;
+          setCurrentMessage(accumulatedMessage);
+        },
+        onEnd: () => {
+          // Add the complete assistant message
+          if (accumulatedMessage.trim()) {
+            onSendMessage(accumulatedMessage, 'assistant');
+          }
+          setIsTyping(false);
+          setCurrentMessage('');
+        },
+        onError: (error) => {
+          console.error('Chat error:', error);
+          setIsTyping(false);
+          setCurrentMessage('');
+          // Add error message
+          onSendMessage('Sorry, I encountered an error. Please try again.', 'assistant');
         }
-        setIsTyping(false);
-        setCurrentMessage('');
       },
-      onError: (error) => {
-        console.error('Chat error:', error);
-        setIsTyping(false);
-        setCurrentMessage('');
-        // Add error message
-        onSendMessage('Sorry, I encountered an error. Please try again.', 'assistant');
-      }
-    });
+      uploadedPlot ? { plotContext: uploadedPlot } : undefined
+    );
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -192,6 +223,61 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, c
     setUploadError(null);
   };
 
+  const handleRemovePNG = () => {
+    setUploadedPlot(null);
+    setUploadPNGError(null);
+    setUploadedFileName(null);
+  };
+
+  const handleUploadButtonClick = () => {
+    if (!isUploadingPlot) {
+      fileInputRefPNG.current?.click();
+    }
+  };
+
+  const uploadPlotToBackend = async (file: File) => {
+    const baseUrl = apiBase?.replace(/\/$/, '') ?? '';
+    const endpoint = `${baseUrl}/api/plots/upload`;
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}));
+      throw new Error(errorBody.detail || 'Failed to upload plot');
+    }
+
+    return response.json();
+  };
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setUploadPNGError(null);
+    setIsUploadingPlot(true);
+
+    try {
+      const response = await uploadPlotToBackend(file);
+      setUploadedFileName(file.name);
+      setUploadedPlot({
+        filename: response.filename ?? file.name,
+        base64: response.base64,
+      });
+    } catch (err) {
+      console.error('Plot upload failed', err);
+      setUploadPNGError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setIsUploadingPlot(false);
+      // Allow uploading the same file again if desired
+      event.target.value = '';
+    }
+  };
+
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
@@ -214,6 +300,62 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, c
             <div>
               <h2 className="text-lg font-semibold text-gray-800">AI Assistant</h2>
               <p className="text-sm text-gray-600">OpenAI Streaming Chat</p>
+              <div className="mt-9">
+                {!uploadedFileName &&
+                  <div>
+                    <input
+                    ref={fileInputRefPNG}
+                    id="plot-upload-input"
+                    type="file"
+                    accept="image/png"
+                    className="hidden"
+                    onChange={handleFileChange}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleUploadButtonClick}
+                    disabled={isUploadingPlot}
+                    className='flex items-center space-x-2 px-3 py-2 text-sm bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                  >
+                  {isUploadingPlot ? (
+                    <>
+                      <Loader className="w-4 h-4 animate-spin" />
+                      <span>Uploading...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4" />
+                      <span>Upload plot as PNG</span>
+                    </>
+                  )}
+                  </button>
+                </div>
+                }
+
+                {/* Uploaded PNG Info */}
+                {uploadedFileName && (
+                  <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
+                    <div className="flex items-center space-x-2">
+                      <FileText className="w-4 h-4 text-green-600" />
+                      <div>
+                        <p className="text-sm font-medium text-green-900">{uploadedFileName}</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleRemovePNG}
+                      className="p-1 hover:bg-green-100 rounded transition-colors"
+                      title="Remove PNG"
+                    >
+                      <X className="w-4 h-4 text-green-700" />
+                    </button>
+                  </div>
+                )}
+                {uploadPNGError && (
+                  <p className="text-xs text-red-500 mt-1">
+                    {uploadPNGError}
+                  </p>
+                )}
+              </div>
             </div>
           </div>
           <div className="flex items-center space-x-2">
@@ -229,8 +371,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, c
         </div>
 
         {/* PDF Upload Section */}
-        <div className="mt-4 space-y-2">
-          {/* Upload Button */}
+        <div className="mt-4 space-y-2 ml-8">
+          {/* Upload PDF Button */}
           {!uploadedPdf && (
             <div>
               <input

@@ -1,7 +1,9 @@
-import openai
-from typing import List, Dict, Generator, Optional
+from typing import List, Dict, Optional
 import json
 import os
+
+import httpx
+import openai
 
 # Get API key from environment variable
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -49,6 +51,16 @@ def safe_extract_content(chunk) -> Optional[str]:
         print(f"Error extracting content: {e}")
         return None
 
+async def _post_openai(payload: Dict) -> Dict:
+    url = "https://api.openai.com/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+        return response.json()
 
 def query_openai_api(instruction: str, inp: str, model: str = "gpt-4o"):
     """
@@ -77,7 +89,6 @@ def query_openai_api(instruction: str, inp: str, model: str = "gpt-4o"):
             max_tokens=2000
         )
         return response.choices[0].message.content
-
 
 async def get_openai_streaming_response(messages: List[Dict[str, str]], model: str = "gpt-4o"):
     """
@@ -136,7 +147,7 @@ async def get_openai_streaming_response(messages: List[Dict[str, str]], model: s
         yield f"Error: {str(e)}"
 
 
-def format_messages(user_input: str, chat_history: List[Dict] = None) -> List[Dict[str, str]]:
+def format_messages(user_input: str, chat_history: List[Dict] = None, plot_context: Optional[Dict] = None,) -> List[Dict[str, str]]:
     """
     Format messages for OpenAI API
     
@@ -177,9 +188,20 @@ Always structure your responses for maximum clarity and readability."""
                 })
     
     # Add current user message
+    if plot_context and plot_context.get("base64"):
+        user_content = [
+            {"type": "text", "text": user_input},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{plot_context['base64']}"},
+            },
+        ]
+    else:
+        user_content = user_input
+
     messages.append({
         "role": "user",
-        "content": user_input
+        "content": user_content
     })
     
     return messages

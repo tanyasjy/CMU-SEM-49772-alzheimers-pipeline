@@ -8,9 +8,35 @@ import uuid
 import shutil
 from rag_indexer import extract_text_from_pdf, chunk_text, embed_texts, build_faiss_index, retrieve
 
+def _load_env_fallback():
+    """Fallback loader for .env that gives a clearer error if encoding is bad."""
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    if not os.path.exists(env_path):
+        return
+
+    try:
+        # Try the common UTF‑8 encoding first (with BOM support)
+        with open(env_path, "r", encoding="utf-8-sig") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
+                    os.environ[key.strip()] = value.strip()
+    except UnicodeDecodeError:
+        # This usually means the file was saved as UTF‑16 or another non‑UTF‑8 encoding.
+        # We surface a clear message instead of a cryptic stack trace.
+        raise RuntimeError(
+            "Failed to read '.env' file due to encoding issues. "
+            "Please re-save the file as UTF-8 (without BOM) and try again."
+        )
+
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    try:
+        # Explicitly tell python-dotenv to expect UTF‑8, and fall back if that fails.
+        load_dotenv(encoding="utf-8")
+    except UnicodeDecodeError:
+        _load_env_fallback()
 except ImportError:
     # If python-dotenv is not installed, manually load .env file
     env_path = os.path.join(os.path.dirname(__file__), '.env')
@@ -30,11 +56,21 @@ import asyncio
 
 from typing import List, Optional, Dict, Any, Tuple
 from enum import Enum
-from models.openai_chat import get_openai_streaming_response, format_messages, query_openai_api
+from datetime import datetime
+from pathlib import Path
+from models.openai_chat import (
+    get_openai_streaming_response,
+    format_messages,
+    query_openai_api,
+)
 from kernel_manager import get_kernel_manager
+import base64
 from storage.azure_blob_manager import get_blob_manager
 
 app = FastAPI(title="Alzheimer's Analysis Pipeline API")
+BASE_DIR = Path(__file__).resolve().parent.parent
+PLOT_UPLOAD_DIR = BASE_DIR / "uploads" / "plots"
+PLOT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # Global state for current notebook
 NOTEBOOKS_DIR = os.path.join(os.path.dirname(__file__), "notebooks")  # Local cache directory
@@ -307,6 +343,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     history: List[ChatMessage] = []
+    plot_context: Optional[Dict[str, Any]] = None
 
 class ExecuteRequest(BaseModel):
     code: str
@@ -398,6 +435,37 @@ async def upload_pdf(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error uploading PDF: {str(e)}")
 
+@app.post("/api/plots/upload")
+async def upload_plot(file: UploadFile = File(...)):
+    """Upload a PNG plot for backend processing/storage."""
+    if file.content_type not in ("image/png", "application/octet-stream"):
+        raise HTTPException(status_code=400, detail="Only PNG files are supported")
+
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+    safe_name = file.filename or "plot.png"
+    filename = f"{timestamp}_{safe_name}".replace(" ", "_")
+    file_path = PLOT_UPLOAD_DIR / filename
+
+    try:
+        with open(file_path, "wb") as buffer:
+            buffer.write(contents)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save plot: {exc}")
+
+    base64_image = base64.b64encode(contents).decode("utf-8")
+    return {
+        "status": "success",
+        "filename": filename,
+        "originalName": file.filename,
+        "size": len(contents),
+        "storedPath": str(file_path),
+        "base64": base64_image,
+    }
+
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
     """
@@ -425,6 +493,7 @@ async def websocket_chat(websocket: WebSocket):
                 message_data = json.loads(data)
                 user_message = message_data.get("message", "")
                 chat_history = message_data.get("history", [])
+                plot_context = message_data.get("plotContext")
                 cell_id = message_data.get("cell_id", None)  # Current cell ID from frontend
                 all_codes = message_data.get("all_codes", None)  # All edited codes from frontend
                 
@@ -479,16 +548,25 @@ async def websocket_chat(websocket: WebSocket):
                         print(f"Retrieved document context from PDF")
                 
                 # Step 3: Build prompt with appropriate context
-                messages = build_prompt(
-                    user_message=user_message,
-                    query_context=query_context,
-                    code_context=code_context,
-                    document_context=document_context,
-                    chat_history=chat_history
-                )
+                model = "gpt-4o" if plot_context and plot_context.get("base64") else "gpt-3.5-turbo"
+                if plot_context:
+                    print(f"Including plot context in prompt")
+                    # Format messages for OpenAI
+                    messages = format_messages(user_message, chat_history, plot_context)
+                    # Get streaming response from OpenAI
+                    print(f"Processing message: {user_message}")
+                else:
+                    print(f"Building prompt with classified context")
+                    messages = build_prompt(
+                        user_message=user_message,
+                        query_context=query_context,
+                        code_context=code_context,
+                        document_context=document_context,
+                        chat_history=chat_history
+                    )
                 
                 # Step 4: Get streaming response from OpenAI
-                response_generator = get_openai_streaming_response(messages)
+                response_generator = get_openai_streaming_response(messages, model=model)
                 
                 # Step 5: Stream each chunk to the client
                 async for chunk in response_generator:
@@ -523,11 +601,13 @@ async def websocket_chat(websocket: WebSocket):
 async def chat_stream(request: ChatRequest):
     """HTTP endpoint for streaming chat (alternative to WebSocket)"""
     try:
-        messages = format_messages(request.message, [msg.dict() for msg in request.history])
+        serialized_history = [msg.dict() for msg in request.history]
+        messages = format_messages(request.message, serialized_history, request.plot_context)
+        model = "gpt-4o" if request.plot_context and request.plot_context.get("base64") else "gpt-3.5-turbo"
         
         # Collect all chunks for HTTP response
         response_chunks = []
-        async for chunk in get_openai_streaming_response(messages):
+        async for chunk in get_openai_streaming_response(messages, model=model):
             if chunk:
                 response_chunks.append(chunk)
         

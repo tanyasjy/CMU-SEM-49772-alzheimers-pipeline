@@ -36,7 +36,7 @@ function App() {
   const [currentNotebook, setCurrentNotebook] = useState<string>('colab.ipynb');
   const [notebookVersion, setNotebookVersion] = useState<number>(0); // Track notebook changes
   const [activeSection, setActiveSection] = useState<SidebarSection>('notebooks'); // Sidebar state
-  const API_BASE = import.meta.env.VITE_API_BASE || '';
+  const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 
   const handleStepClick = (stepId: string) => {
     setCurrentStepId(stepId);
@@ -264,6 +264,7 @@ function App() {
           currentCellId={currentStepId || undefined} // Pass current cell ID
           allEditedCodes={allEditedCodes} // Pass all edited codes
           initialCodes={initialCodes} // Pass initial codes from file
+          apiBase={API_BASE}
         />
       </div>
     </div>
